@@ -2,19 +2,24 @@
 
 # Standard
 from os import listdir
-from os.path import dirname, exists
+from os.path import dirname, exists, join
+import pathlib
+import typing
 
 # Third Party
 from git import GitError, Repo
 import click
 
 # First Party
-from instructlab import utils
+from instructlab import clickext, utils
 from instructlab.configuration import (
     DEFAULTS,
+    Config,
     ensure_storage_directories_exist,
     get_default_config,
+    read_config,
     read_train_profile,
+    recreate_train_profiles,
     write_config,
 )
 
@@ -29,7 +34,7 @@ from instructlab.configuration import (
 @click.option(
     "--model-path",
     type=click.Path(),
-    default=lambda: DEFAULTS.DEFAULT_GGUF_MODEL,
+    default=lambda: DEFAULTS.DEFAULT_MODEL,
     show_default="The instructlab data files location per the user's system.",
     help="Path to the model used during generation.",
 )
@@ -59,8 +64,25 @@ from instructlab.configuration import (
     "Please do not use this option if you are planning to contribute back "
     "using the same taxonomy repository. ",
 )
-@click.option("--train-profile", type=click.Path(), default=None)
+@click.option(
+    "--train-profile",
+    type=click.Path(),
+    default=None,
+    help="Overwrite the default training values in the generated config.yaml by passing in an existing training-specific yaml.",
+)
+@click.option(
+    "--config",
+    "config_file",
+    type=click.Path(),
+    default=None,
+    envvar=DEFAULTS.ILAB_GLOBAL_CONFIG,
+    show_default=True,
+    help="Path to a configuration file.",
+)
+@clickext.display_params
+@click.pass_context
 def init(
+    ctx,
     interactive,
     model_path: str,
     taxonomy_path,
@@ -68,17 +90,121 @@ def init(
     repository,
     min_taxonomy,
     train_profile,
+    config_file,
 ):
     """Initializes environment for InstructLab"""
     ensure_storage_directories_exist()
+    param_source = ctx.get_parameter_source("config_file")
+    try:
+        overwrite = False
+        if interactive:
+            overwrite = check_if_configs_exist()
+    except click.exceptions.Exit as e:
+        ctx.exit(e.exit_code)
+    else:
+        try:
+            model_path, taxonomy_path, cfg = get_params(
+                param_source,
+                interactive,
+                repository,
+                min_taxonomy,
+                model_path,
+                taxonomy_path,
+                config_file,
+            )
+        except click.exceptions.Exit as e:
+            ctx.exit(e.exit_code)
+    if overwrite:
+        click.echo(
+            f"Generating `{DEFAULTS.CONFIG_FILE}` and `{DEFAULTS.TRAIN_PROFILE_DIR}`..."
+        )
+        recreate_train_profiles(overwrite=True)
+    else:
+        click.echo(f"Generating `{DEFAULTS.CONFIG_FILE}`...")
+    if train_profile is not None:
+        cfg.train = read_train_profile(train_profile)
+    elif interactive:
+        entries = sorted(listdir(DEFAULTS.TRAIN_PROFILE_DIR))
+        click.echo("Please choose a train profile to use:")
+        click.echo("[0] No profile (CPU-only)")
+        for i, value in enumerate(entries):
+            click.echo(f"[{i+1}] {value}")
+        train_profile_selection = click.prompt(
+            "Enter the number of your choice [hit enter for the default CPU-only profile]",
+            type=int,
+            default=0,
+        )
+        if 1 <= train_profile_selection <= len(entries):
+            click.echo(f"You selected: {entries[train_profile_selection - 1]}")
+            cfg.train = read_train_profile(
+                join(DEFAULTS.TRAIN_PROFILE_DIR, entries[train_profile_selection - 1])
+            )
+        elif train_profile_selection == 0:
+            click.echo("Using default CPU-only train profile.")
+        else:
+            click.secho(
+                "Invalid selection. Please select a valid train profile option.",
+                fg="red",
+            )
+            raise click.exceptions.Exit(1)
+
+    # we should not override all paths with the serve model if special ENV vars exist
+    if param_source != click.core.ParameterSource.ENVIRONMENT:
+        cfg.chat.model = model_path
+        cfg.generate.model = model_path
+        cfg.serve.model_path = model_path
+        cfg.evaluate.model = model_path
+    cfg.generate.taxonomy_path = taxonomy_path
+    cfg.generate.taxonomy_base = taxonomy_base
+    cfg.evaluate.mt_bench_branch.taxonomy_path = taxonomy_path
+    write_config(cfg)
+
+    click.secho(
+        "Initialization completed successfully, you're ready to start using `ilab`. Enjoy!",
+        fg="green",
+    )
+
+
+def check_if_configs_exist() -> bool:
+    if exists(DEFAULTS.CONFIG_FILE):
+        overwrite = click.confirm(
+            f"Found {DEFAULTS.CONFIG_FILE}, do you still want to continue?"
+        )
+        if not overwrite:
+            raise click.exceptions.Exit(0)
+    if exists(DEFAULTS.TRAIN_PROFILE_DIR):
+        return click.confirm(
+            f"Found {DEFAULTS.TRAIN_PROFILE_DIR}, do you also want to reset existing profiles?"
+        )
+    return True
+
+
+def get_params_from_env(
+    obj: typing.Optional[typing.Any],
+) -> typing.Tuple[str, str, Config]:
+    if obj is None or not hasattr(obj, "config"):
+        raise ValueError("obj must not be None and must have a 'config' attribute")
+    return (
+        obj.config.generate.taxonomy_path,
+        obj.config.generate.taxonomy_base,
+        obj.config,
+    )
+
+
+def get_params(
+    param_source: click.core.ParameterSource,
+    interactive: bool,
+    repository: str,
+    min_taxonomy: bool,
+    model_path: str,
+    taxonomy_path: pathlib.Path,
+    config: pathlib.Path | None,
+) -> typing.Tuple[str, pathlib.Path, Config]:
+    cfg = get_default_config()
+    if config is not None:
+        cfg = read_config(config)
     clone_taxonomy_repo = True
     if interactive:
-        if exists(DEFAULTS.CONFIG_FILE):
-            overwrite = click.confirm(
-                f"Found {DEFAULTS.CONFIG_FILE} in the current directory, do you still want to continue?"
-            )
-            if not overwrite:
-                return
         click.echo(
             "Welcome to InstructLab CLI. This guide will help you to setup your environment."
         )
@@ -86,9 +212,10 @@ def init(
             "Please provide the following values to initiate the "
             "environment [press Enter for defaults]:"
         )
-        taxonomy_path = utils.expand_path(
-            click.prompt("Path to taxonomy repo", default=taxonomy_path)
-        )
+        if param_source != click.core.ParameterSource.ENVIRONMENT:
+            taxonomy_path = utils.expand_path(
+                click.prompt("Path to taxonomy repo", default=taxonomy_path)
+            )
 
     try:
         taxonomy_contents = listdir(taxonomy_path)
@@ -96,9 +223,10 @@ def init(
         taxonomy_contents = []
     if taxonomy_contents:
         clone_taxonomy_repo = False
-    elif interactive:
+    elif interactive and param_source != click.core.ParameterSource.ENVIRONMENT:
         clone_taxonomy_repo = click.confirm(
-            f"`{taxonomy_path}` seems to not exist or is empty. Should I clone {repository} for you?"
+            f"`{taxonomy_path}` seems to not exist or is empty. Should I clone {repository} for you?",
+            default=True,
         )
 
     # clone taxonomy repo if it needs to be cloned
@@ -120,24 +248,13 @@ def init(
 
     # check if models dir exists, and if so ask for which model to use
     models_dir = dirname(model_path)
-    if interactive and exists(models_dir):
+    if (
+        interactive
+        and exists(models_dir)
+        and param_source != click.core.ParameterSource.ENVIRONMENT
+    ):
         model_path = utils.expand_path(
             click.prompt("Path to your model", default=model_path)
         )
-    click.echo(f"Generating `{DEFAULTS.CONFIG_FILE}`...")
-    cfg = get_default_config()
-    if train_profile is not None:
-        cfg.train = read_train_profile(train_profile)
-    cfg.chat.model = model_path
-    cfg.generate.model = model_path
-    cfg.serve.model_path = model_path
-    cfg.generate.taxonomy_path = taxonomy_path
-    cfg.generate.taxonomy_base = taxonomy_base
-    cfg.evaluate.model = model_path
-    cfg.evaluate.mt_bench_branch.taxonomy_path = taxonomy_path
-    write_config(cfg)
 
-    click.secho(
-        "Initialization completed successfully, you're ready to start using `ilab`. Enjoy!",
-        fg="green",
-    )
+    return model_path, taxonomy_path, cfg
