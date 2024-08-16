@@ -11,7 +11,6 @@ import yaml
 
 # First Party
 from instructlab import clickext
-from instructlab.configuration import DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +20,11 @@ logger = logging.getLogger(__name__)
     "--taxonomy-path",
     type=click.Path(),
     help="Path to where the taxonomy is stored locally.",
-    default=lambda: DEFAULTS.TAXONOMY_DIR,
     show_default="Default taxonomy location in the instructlab data directory.",
 )
 @click.option(
     "--taxonomy-base",
-    help="Base git-ref to use for taxonomy.",
+    help="Base git-ref to use for taxonomy, use 'empty' for the entire repo contents.",
 )
 @click.option(
     "--yaml-rules",
@@ -48,7 +46,12 @@ def diff(ctx, taxonomy_path, taxonomy_base, yaml_rules, quiet):
     """
     # pylint: disable=import-outside-toplevel
     # Local
-    from ..utils import TaxonomyReadingException, get_taxonomy_diff, validate_taxonomy
+    from ..utils import (
+        TaxonomyReadingException,
+        get_taxonomy,
+        get_taxonomy_diff,
+        validate_taxonomy,
+    )
 
     # load defaults from config ctx obj if not specified via CLI arg
     if not taxonomy_base:
@@ -62,15 +65,20 @@ def diff(ctx, taxonomy_path, taxonomy_base, yaml_rules, quiet):
         if is_file:  # taxonomy_path is file
             click.echo(taxonomy_path)
         else:  # taxonomy_path is dir
-            try:
-                updated_taxonomy_files = get_taxonomy_diff(taxonomy_path, taxonomy_base)
-            except (TaxonomyReadingException, GitError) as exc:
-                click.secho(
-                    f"Reading taxonomy failed with the following error: {exc}",
-                    fg="red",
-                )
-                raise SystemExit(1) from exc
-            for f in updated_taxonomy_files:
+            if taxonomy_base == "empty":
+                # Gather all the yamls - equivalent to a diff against "the null tree"
+                taxonomy_files = get_taxonomy(taxonomy_path)
+            else:
+                try:
+                    # Gather the new or changed YAMLs using git diff, including untracked files
+                    taxonomy_files = get_taxonomy_diff(taxonomy_path, taxonomy_base)
+                except (TaxonomyReadingException, GitError) as exc:
+                    click.secho(
+                        f"Reading taxonomy failed with the following error: {exc}",
+                        fg="red",
+                    )
+                    raise SystemExit(1) from exc
+            for f in taxonomy_files:
                 click.echo(f)
 
     # validate new or changed taxonomy files

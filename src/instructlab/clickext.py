@@ -15,6 +15,9 @@ from click.core import ParameterSource
 from click_didyoumean import DYMGroup
 import click
 
+# First Party
+from instructlab.configuration import DEFAULTS, storage_dirs_exist
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +66,7 @@ class ExpandAliasesGroup(LazyEntryPointGroup):
     def get_alias_info(self, cmd_name: str) -> tuple[str, str]:
         ep: metadata.EntryPoint = self.alias_eps[cmd_name]
         # assume that the second item of the module name is the group
-        return ep.module.split(".", 3)[1], ep.attr
+        return ep.module.split(".", 3)[1], ep.module.split(".", 3)[2]
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         if cmd_name in self.alias_eps.names:
@@ -76,6 +79,17 @@ class ExpandAliasesGroup(LazyEntryPointGroup):
                 "in a future release. Please consider using "
                 f"`ilab {group} {primary}` instead"
             )
+            # if some storage dirs do not exist
+            # AND the command is not `ilab init`
+            # AND the --config flag is not customized, then we error
+            if not storage_dirs_exist() and (
+                primary != "init" and ctx.params["config_file"] == DEFAULTS.CONFIG_FILE
+            ):
+                click.secho(
+                    "Some ilab storage directories do not exist yet. Please run `ilab config init` before continuing.",
+                    fg="red",
+                )
+                raise click.exceptions.Exit(1)
             return cmd
         return super().get_command(ctx, cmd_name)
 

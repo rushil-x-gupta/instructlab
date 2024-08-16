@@ -1,6 +1,16 @@
 #!/usr/bin/env -S bash -e
 # SPDX-License-Identifier: Apache-2.0
 
+rh__ensure-ibm-system-pkgs() {
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    if [[ "$ID" == "fedora" ]] || [[ "$ID_LIKE" =~ "fedora" ]]; then
+        curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+    else
+        echo "neither system 'ID' nor 'ID_LIKE' is 'fedora' - did you mean to specify a 'rh' system?"
+    fi
+}
+
 rh__ensure-aws-system-pkgs() {
     ADDN_PKGS=false
     while getopts "s" opt; do
@@ -29,11 +39,34 @@ rh__ensure-aws-system-pkgs() {
 }
 
 rh() {
-    local cmdname=$1; shift
+    local cmdname=$1
+    if [ -z "$cmdname" ]; then
+        show_usage
+        exit 1
+    fi
+    shift
     if [ "$(type -t "rh__$cmdname")" = "function" ] >/dev/null 2>&1; then
         "rh__$cmdname" "$@"
     elif [ "$(type -t "${cmdname//-/_}")" = "function" ] >/dev/null 2>&1; then
         "${cmdname//-/_}" "rh"
+    else
+        echo "Invalid command: $cmdname"
+        show_usage
+        exit 1
+    fi
+}
+
+ibm() {
+    local cmdname=$1
+    if [ -z "$cmdname" ]; then
+        show_usage
+        exit 1
+    fi
+    shift
+    if [ "$(type -t "ibm__$cmdname")" = "function" ] >/dev/null 2>&1; then
+        "ibm__$cmdname" "$@"
+    elif [ "$(type -t "${cmdname//-/_}")" = "function" ] >/dev/null 2>&1; then
+        "${cmdname//-/_}" "ibm"
     else
         echo "Invalid command: $cmdname"
         show_usage
@@ -54,6 +87,8 @@ Commands
     ensure-aws-system-pkgs - Ensure your local system has the packages needed for AWS interactions
         -s
             Flag to also add additional packages needed for SAML authentication with the AWS CLI
+
+    ensure-ibm-system-pkgs - Ensure your local system has the packages needed for IBM Cloud interactions
 "
 }
 
