@@ -96,25 +96,34 @@ class Server(BackendServer):
         http_client: httpx.Client | None = None,
         background: bool = True,
         foreground_allowed: bool = False,
+        max_startup_retries: int = 0,
     ) -> str:
-        try:
-            _, vllm_server_process, api_base = ensure_server(
-                backend=VLLM,
-                api_base=self.api_base,
-                http_client=http_client,
-                host=self.host,
-                port=self.port,
-                background=background,
-                foreground_allowed=foreground_allowed,
-                server_process_func=self.create_server_process,
-                max_startup_attempts=self.max_startup_attempts,
-            )
-            self.process = vllm_server_process or self.process
-            self.api_base = api_base or self.api_base
-        except ServerException as exc:
-            raise exc
-        except SystemExit as exc:
-            raise exc
+        for i in range(max_startup_retries + 1):
+            try:
+                _, vllm_server_process, api_base = ensure_server(
+                    backend=VLLM,
+                    api_base=self.api_base,
+                    http_client=http_client,
+                    host=self.host,
+                    port=self.port,
+                    background=background,
+                    foreground_allowed=foreground_allowed,
+                    server_process_func=self.create_server_process,
+                    max_startup_attempts=self.max_startup_attempts,
+                )
+                self.process = vllm_server_process or self.process
+                self.api_base = api_base or self.api_base
+                break
+            except ServerException as e:
+                if i == max_startup_retries:
+                    raise e
+                logger.info(
+                    "vLLM startup failed.  Retrying (%s/%s)",
+                    i + 1,
+                    max_startup_retries,
+                )
+                logger.error(e)
+
         return self.api_base
 
     def shutdown(self):
@@ -195,14 +204,27 @@ def run_vllm(
 
     logger.debug(f"vLLM serving command is: {vllm_cmd}")
 
+    vllm_env = os.environ.copy()
+    # Reset vllm logging to the default (enabled)
+    vllm_env.pop("VLLM_CONFIGURE_LOGGING", None)
+
     try:
+        # Note: start_new_session=True is needed to create a process group which will later be used on shutdown
         if background:
             vllm_process = subprocess.Popen(
-                args=vllm_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                args=vllm_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=vllm_env,
+                start_new_session=True,
             )
         else:
             # pylint: disable=consider-using-with
-            vllm_process = subprocess.Popen(args=vllm_cmd)
+            vllm_process = subprocess.Popen(
+                args=vllm_cmd,
+                env=vllm_env,
+                start_new_session=True,
+            )
 
         api_base = get_api_base(f"{host}:{port}")
         logger.info("vLLM starting up on pid %s at %s", vllm_process.pid, api_base)

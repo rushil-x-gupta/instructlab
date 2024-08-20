@@ -27,11 +27,6 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-JUDGE_MODEL_NAME = "judge_model"
-TEST_MODEL_NAME = "test_model"
-BASE_TEST_MODEL_NAME = "base_test_model"
-
-
 # Python 3.10 does not have StrEnum
 class Benchmark(str, enum.Enum):
     MMLU = "mmlu"
@@ -109,8 +104,8 @@ def get_evaluator(
             from instructlab.eval.mt_bench import MTBenchEvaluator
 
             return MTBenchEvaluator(
-                TEST_MODEL_NAME,
-                JUDGE_MODEL_NAME,
+                get_model_name(model),
+                get_model_name(judge_model),
                 output_dir,
                 max_workers,
                 merge_system_user_message=merge_system_user_message,
@@ -119,8 +114,8 @@ def get_evaluator(
         from instructlab.eval.mt_bench import MTBenchBranchEvaluator
 
         return MTBenchBranchEvaluator(
-            TEST_MODEL_NAME,
-            JUDGE_MODEL_NAME,
+            get_model_name(model),
+            get_model_name(judge_model),
             taxonomy_path,
             branch,
             output_dir,
@@ -271,6 +266,10 @@ def qa_pairs_to_qna_to_avg_scores(qa_pairs: list[dict]) -> dict[str, float]:
     return qna_to_avg_scores
 
 
+def get_model_name(model_path):
+    return os.path.basename(os.path.normpath(model_path))
+
+
 def launch_server(
     ctx: click.Context,
     model: str,
@@ -345,6 +344,7 @@ def launch_server(
             ),
             background=not enable_serving_output,
             foreground_allowed=True,
+            max_startup_retries=1,
         )
     except Exception as exc:
         click.secho(f"Failed to start server: {exc}", fg="red")
@@ -538,7 +538,7 @@ def evaluate(
                 server, api_base = launch_server(
                     ctx,
                     model,
-                    TEST_MODEL_NAME,
+                    get_model_name(model),
                     max_workers,
                     gpus,
                     backend,
@@ -554,7 +554,7 @@ def evaluate(
                 server, api_base = launch_server(
                     ctx,
                     judge_model,
-                    JUDGE_MODEL_NAME,
+                    get_model_name(judge_model),
                     max_workers,
                     gpus,
                     judge_backend,
@@ -587,8 +587,8 @@ def evaluate(
             evaluators = [
                 evaluator,
                 MTBenchBranchEvaluator(
-                    BASE_TEST_MODEL_NAME,
-                    JUDGE_MODEL_NAME,
+                    get_model_name(base_model),
+                    get_model_name(judge_model),
                     taxonomy_path,
                     base_branch,
                     output_dir,
@@ -598,7 +598,7 @@ def evaluate(
             ]
             branches = [branch, base_branch]
             m_paths = [model, base_model]
-            m_names = [TEST_MODEL_NAME, BASE_TEST_MODEL_NAME]
+            m_names = [get_model_name(model), get_model_name(base_model)]
             qa_pairs_and_errors = []
             server = None
 
@@ -630,7 +630,7 @@ def evaluate(
                 server, api_base = launch_server(
                     ctx,
                     judge_model,
-                    JUDGE_MODEL_NAME,
+                    get_model_name(judge_model),
                     max_workers,
                     gpus,
                     judge_backend,

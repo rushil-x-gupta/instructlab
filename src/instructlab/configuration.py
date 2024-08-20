@@ -336,7 +336,7 @@ class _serve(BaseModel):
     # vllm configuration
     vllm: _serve_vllm = _serve_vllm(
         llm_family="",
-        max_startup_attempts=300,
+        max_startup_attempts=120,
     )
 
     # llama-cpp configuration
@@ -366,7 +366,7 @@ class _serve(BaseModel):
         defaults = {
             "model_path": DEFAULTS.DEFAULT_MODEL,
             "llama_cpp": {"gpu_layers": -1, "max_ctx_size": 4096, "llm_family": ""},
-            "vllm": {"llm_family": "", "vllm_args": [], "max_startup_attempts": 300},
+            "vllm": {"llm_family": "", "vllm_args": [], "max_startup_attempts": 120},
         }
         return finish_cfg_section(defaults, values)
 
@@ -666,7 +666,7 @@ def get_default_config() -> Config:
             ),
             vllm=_serve_vllm(
                 llm_family="",
-                max_startup_attempts=300,
+                max_startup_attempts=120,
             ),
         ),
         train=_train(
@@ -917,7 +917,7 @@ def recreate_train_profiles(overwrite: bool = False) -> bool:
             effective_batch_size=128,
             lora_quantize_dtype=None,
             lora_rank=0,
-            max_batch_len=55000,
+            max_batch_len=54000,
             max_seq_len=4096,
             save_samples=1000,
             deepspeed_cpu_offload_optimizer=False,
