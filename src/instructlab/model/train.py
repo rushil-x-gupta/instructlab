@@ -308,7 +308,7 @@ def clickpath_setup(is_dir: bool) -> click.Path:
 @click.option(
     "--legacy",
     is_flag=True,
-    help="if true, enables the legacy linux training codepath from release 0.17.0 and prior.",
+    help="if true, enables the legacy linux training code path from release 0.17.0 and prior.",
 )
 @click.option(
     "--strategy",
@@ -806,8 +806,12 @@ def _mmlu(model: pathlib.Path) -> float:
     from instructlab.eval.mmlu import MMLU_TASKS, MMLUEvaluator
     import torch
 
-    # TODO: few_shots is enforced to be 5 here. Should be grabbed from config.
-    evaluator = MMLUEvaluator(model, tasks=MMLU_TASKS, few_shots=5)
+    min_tasks = os.environ.get("INSTRUCTLAB_EVAL_MMLU_MIN_TASKS")
+    if min_tasks is not None:
+        tasks = ["mmlu_abstract_algebra", "mmlu_anatomy", "mmlu_astronomy"]
+        evaluator = MMLUEvaluator(model, tasks=tasks)
+    else:
+        evaluator = MMLUEvaluator(model, tasks=MMLU_TASKS)
 
     # type the variable because MyPy doesn't seem to honor the types of the spread tuple
     ckpt_score: float
@@ -826,7 +830,7 @@ def _mtbench(
     mtbench_judge: pathlib.Path,
     enable_serving_output: bool,
 ) -> float:
-    # TODO: optimization: run all generations in serial and then do all judgements at once to save time loading/unloading prometheus.
+    # TODO: optimization: run all generations in serial and then do all judgments at once to save time loading/unloading prometheus.
 
     # Third Party
     from instructlab.eval.mt_bench import MTBenchEvaluator
@@ -871,7 +875,7 @@ def _mtbench(
             server.shutdown()
 
     try:
-        logger.debug("Starting model server for mt-bench answer judgement")
+        logger.debug("Starting model server for mt-bench answer judgment")
         server, model_serve_url = launch_server(
             ctx=ctx,
             model=str(mtbench_judge),
@@ -912,7 +916,7 @@ def _evaluate_dir_of_checkpoints(
 
     if not results:
         raise RuntimeError(
-            "_evaluate_dir_of_checkpoints - No checkpoints were evaluated successfully at %s. No scores were recored."
+            "_evaluate_dir_of_checkpoints - No checkpoints were evaluated successfully at %s. No scores were recorded."
             % checkpoints_dir
         )
 

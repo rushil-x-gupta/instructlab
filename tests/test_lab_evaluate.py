@@ -11,6 +11,9 @@ from git import Repo
 # First Party
 from instructlab import lab
 
+# Local
+from . import common
+
 
 def gen_qa_pairs(odd):
     i = 1
@@ -413,6 +416,28 @@ def test_invalid_model_mmlu(cli_runner: CliRunner):
 
 
 @patch(
+    "instructlab.eval.mmlu.MMLUEvaluator",
+    side_effect=Exception("Exiting to check call_args"),
+)
+def test_int_batchsize_mmlu(mmlu_mock, cli_runner: CliRunner):
+    cli_runner.invoke(
+        lab.ilab,
+        [
+            "--config=DEFAULT",
+            "model",
+            "evaluate",
+            "--benchmark",
+            "mmlu",
+            "--model",
+            "instructlab/granite-7b-lab",
+            "--batch-size",
+            "1",
+        ],
+    )
+    assert mmlu_mock.call_args_list[0][1]["batch_size"] == 1
+
+
+@patch(
     "instructlab.model.evaluate.launch_server",
     return_value=(mock.MagicMock(), "http://127.0.0.1:8000/v1"),
 )
@@ -540,3 +565,24 @@ def test_invalid_model_path_mt_bench(cli_runner: CliRunner, tmp_path):
         in result.output
     )
     assert result.exit_code != 0
+
+
+def test_vllm_args_null(cli_runner: CliRunner):
+    fname = common.setup_gpus_config(section_path="serve", vllm_args=lambda: None)
+    args = common.vllm_setup_test(
+        cli_runner,
+        [
+            f"--config={fname}",
+            "model",
+            "evaluate",
+            "--benchmark",
+            "mt_bench",
+            "--model",
+            "instructlab/granite-7b-lab",
+            "--judge-model",
+            "instructlab/merlinite-7b-lab",
+            "--gpus",
+            "4",
+        ],
+    )
+    common.assert_tps(args, "4")

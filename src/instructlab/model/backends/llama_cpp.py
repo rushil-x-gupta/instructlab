@@ -21,17 +21,19 @@ import llama_cpp.server.app as llama_app
 from ...client import check_api_base
 from ...configuration import get_api_base
 from .backends import (
-    API_ROOT_WELCOME_MESSAGE,
-    CHAT_TEMPLATE_AUTO,
-    CHAT_TEMPLATE_TOKENIZER,
-    LLAMA_CPP,
     BackendServer,
     ServerException,
     UvicornServer,
     free_tcp_ipv4_port,
-    get_model_template,
     get_uvicorn_config,
     is_temp_server_running,
+)
+from .common import (
+    API_ROOT_WELCOME_MESSAGE,
+    CHAT_TEMPLATE_AUTO,
+    CHAT_TEMPLATE_TOKENIZER,
+    LLAMA_CPP,
+    get_model_template,
     verify_template_exists,
 )
 
